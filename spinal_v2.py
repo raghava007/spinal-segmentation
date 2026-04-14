@@ -52,8 +52,32 @@ def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1') -> str:
     target_z = int(centroid[2])
     print(f"{target_vertebra}: center at ({target_x}, {target_y}, {target_z})")
 
-    # Create figure with sagittal and axial views
-    fig, axes = plt.subplots(2, 2, figsize=(16, 14))
+    # Load all C1-C7 vertebrae for comprehensive view
+    all_vertebrae = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']
+    vertebrae_data = {}
+    vertebrae_centroids = {}
+    colors = {
+        'C1': (1, 0, 0),      # Red
+        'C2': (0, 1, 0),      # Green
+        'C3': (0, 0, 1),      # Blue
+        'C4': (1, 1, 0),      # Yellow
+        'C5': (1, 0, 1),      # Magenta
+        'C6': (0, 1, 1),      # Cyan
+        'C7': (1, 0.5, 0),    # Orange
+    }
+    
+    for vert in all_vertebrae:
+        vert_path = os.path.join(seg_dir, f'vertebrae_{vert}.nii.gz')
+        if os.path.exists(vert_path):
+            vert_seg = nib.load(vert_path).get_fdata()
+            if np.sum(vert_seg > 0) > 0:
+                vertebrae_data[vert] = vert_seg
+                vert_centroid = center_of_mass(vert_seg > 0)
+                vertebrae_centroids[vert] = (int(vert_centroid[0]), int(vert_centroid[1]), int(vert_centroid[2]))
+                print(f"{vert}: center at {vertebrae_centroids[vert]}")
+    
+    # Create figure with sagittal and axial views (3 rows x 2 cols)
+    fig, axes = plt.subplots(3, 2, figsize=(16, 20))
 
     # Get sagittal slice at target vertebra centroid
     # Sagittal slice through target vertebra
@@ -118,6 +142,55 @@ def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1') -> str:
     
     axes[1, 1].set_title(f'{target_vertebra} Identified - Axial View', fontsize=14)
     axes[1, 1].axis('off')
+
+    # BOTTOM ROW: All C1-C7 vertebrae labeled
+    # Find best sagittal slice that shows all vertebrae (use average x of all centroids)
+    if vertebrae_centroids:
+        avg_x = int(np.mean([c[0] for c in vertebrae_centroids.values()]))
+    else:
+        avg_x = target_x
+    
+    # LEFT: Sagittal view with all vertebrae
+    sagittal_all_ct = data[avg_x, :, :].T
+    axes[2, 0].imshow(sagittal_all_ct, cmap='gray', origin='lower', vmin=-400, vmax=1000)
+    
+    # Overlay all vertebrae with different colors
+    for vert, vert_seg in vertebrae_data.items():
+        vert_mask = vert_seg[avg_x, :, :].T.copy().astype(float)
+        vert_mask[vert_mask == 0] = np.nan
+        vert_overlay = create_color_overlay(vert_mask, color=colors[vert], alpha=0.5)
+        axes[2, 0].imshow(vert_overlay, origin='lower')
+        
+        # Add label at centroid y, z position
+        cy, cz = vertebrae_centroids[vert][1], vertebrae_centroids[vert][2]
+        axes[2, 0].annotate(vert, (cy, cz), fontsize=12, fontweight='bold',
+                            color='white', ha='center', va='center',
+                            bbox=dict(boxstyle='round,pad=0.2', facecolor=colors[vert], alpha=0.8))
+    
+    axes[2, 0].set_title(f'All Cervical Vertebrae (C1-C7) - Sagittal View (x={avg_x})', fontsize=14)
+    axes[2, 0].axis('off')
+    
+    # RIGHT: Legend and info
+    axes[2, 1].axis('off')
+    legend_y = 0.9
+    axes[2, 1].text(0.5, 0.95, 'Vertebrae Legend', fontsize=16, fontweight='bold',
+                    ha='center', va='top', transform=axes[2, 1].transAxes)
+    
+    for i, vert in enumerate(all_vertebrae):
+        if vert in vertebrae_centroids:
+            status = f"✓ Detected at {vertebrae_centroids[vert]}"
+            color = colors[vert]
+        else:
+            status = "✗ Not found"
+            color = (0.5, 0.5, 0.5)
+        
+        y_pos = 0.85 - (i * 0.1)
+        # Draw color box
+        rect = plt.Rectangle((0.1, y_pos - 0.03), 0.08, 0.06, 
+                              facecolor=color, transform=axes[2, 1].transAxes, clip_on=False)
+        axes[2, 1].add_patch(rect)
+        axes[2, 1].text(0.22, y_pos, f'{vert}: {status}', fontsize=12,
+                        ha='left', va='center', transform=axes[2, 1].transAxes)
 
     ct_filename = os.path.basename(ct_path)
     plt.suptitle(f'Cervical Spine Segmentation - {ct_filename}', fontsize=16)
