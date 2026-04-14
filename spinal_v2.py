@@ -7,16 +7,50 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import subprocess
+import shutil
 from scipy.ndimage import center_of_mass
 
 
-def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1') -> str:
+def clean_segmentation_folder(seg_dir: str):
+    """Remove existing segmentation files before generating new ones."""
+    if os.path.exists(seg_dir):
+        print(f"Cleaning existing segmentation folder: {seg_dir}")
+        shutil.rmtree(seg_dir)
+    os.makedirs(seg_dir, exist_ok=True)
+
+
+def run_totalsegmentator(ct_path: str, output_dir: str):
+    """Run TotalSegmentator to generate vertebrae segmentation files."""
+    print("Running TotalSegmentator to generate segmentation files...")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Run TotalSegmentator with vertebrae subset
+    cmd = [
+        'TotalSegmentator',
+        '-i', ct_path,
+        '-o', output_dir,
+        '--roi_subset', 'vertebrae_C1', 'vertebrae_C2', 'vertebrae_C3', 
+        'vertebrae_C4', 'vertebrae_C5', 'vertebrae_C6', 'vertebrae_C7'
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True)
+        print("TotalSegmentator completed successfully.")
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"TotalSegmentator failed: {e}")
+    except FileNotFoundError:
+        raise RuntimeError("TotalSegmentator not found. Install with: pip install TotalSegmentator")
+
+
+def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1', sagittal_slice: int = None) -> str:
     """
     Process CT scan and identify target vertebra in sagittal and axial views.
     
     Args:
         ct_path: Path to CT NIfTI file (.nii or .nii.gz)
         target_vertebra: Which vertebra to identify (C1-C7)
+        sagittal_slice: Optional specific sagittal slice index (x). If None, uses vertebra centroid.
         
     Returns:
         Path to saved output image
@@ -25,8 +59,14 @@ def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1') -> str:
     
     # Derive seg_dir and output_dir from script location
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    seg_dir = os.path.join(script_dir, 'segm')
+    seg_dir = os.path.join(script_dir, 'generate masked data')
     output_dir = os.path.join(script_dir, 'output')
+    
+    # Clean existing segmentation files before generating new ones
+    clean_segmentation_folder(seg_dir)
+    
+    # Always run TotalSegmentator to generate fresh segmentation for this CT
+    run_totalsegmentator(ct_path, seg_dir)
     
     # Load CT
     img = nib.load(ct_path)
@@ -47,10 +87,17 @@ def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1') -> str:
     
     # Get centroid of target vertebra
     centroid = center_of_mass(target_seg > 0)
-    target_x = int(centroid[0])
+    centroid_x = int(centroid[0])
     target_y = int(centroid[1])
     target_z = int(centroid[2])
-    print(f"{target_vertebra}: center at ({target_x}, {target_y}, {target_z})")
+    
+    # Use provided sagittal slice or fall back to centroid
+    if sagittal_slice is not None:
+        target_x = sagittal_slice
+        print(f"Using provided sagittal slice: x={target_x}")
+    else:
+        target_x = centroid_x
+    print(f"{target_vertebra}: center at ({centroid_x}, {target_y}, {target_z})")
 
     # Load all C1-C7 vertebrae for comprehensive view
     all_vertebrae = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']
@@ -144,8 +191,10 @@ def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1') -> str:
     axes[1, 1].axis('off')
 
     # BOTTOM ROW: All C1-C7 vertebrae labeled
-    # Find best sagittal slice that shows all vertebrae (use average x of all centroids)
-    if vertebrae_centroids:
+    # Use provided sagittal slice or average x of all centroids for all-vertebrae view
+    if sagittal_slice is not None:
+        avg_x = sagittal_slice
+    elif vertebrae_centroids:
         avg_x = int(np.mean([c[0] for c in vertebrae_centroids.values()]))
     else:
         avg_x = target_x
@@ -197,7 +246,8 @@ def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1') -> str:
     plt.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f'cervical_spine_{target_vertebra.lower()}.png')
+    slice_suffix = f'_x{sagittal_slice}' if sagittal_slice is not None else ''
+    output_path = os.path.join(output_dir, f'cervical_spine_{target_vertebra.lower()}{slice_suffix}.png')
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
     
@@ -207,7 +257,8 @@ def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1') -> str:
 
 if __name__ == '__main__':
     ct_path = '/Users/fc20024/Documents/github/spinal-segmentation/sample input files/sub-gl003_dir-ax_ct.nii.gz'
-    target = 'C1'
+    target = 'C2'
+    sagittal_slice = 200  # Set to a specific slice index (e.g., 250) or None to use centroid
     
-    process_cervical_spine(ct_path, target)
+    process_cervical_spine(ct_path, target, sagittal_slice)
     
