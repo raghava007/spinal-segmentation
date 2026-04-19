@@ -367,7 +367,7 @@ def process_cervical_spine(ct_path: str, target_vertebra: str = 'C1', sagittal_s
 
 if __name__ == '__main__':
     ct_path = '/Users/fc20024/Documents/github/spinal-segmentation/sample input files/sub-gl003_dir-ax_ct.nii.gz'
-    target = 'C3'
+    target = 'C5'
     sagittal_slice = 200  # Set to a specific slice index (e.g., 250) or None to use centroid
     
     process_cervical_spine(ct_path, target, sagittal_slice)
